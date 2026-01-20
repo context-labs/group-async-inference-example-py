@@ -4,12 +4,76 @@ Sample scripts demonstrating how to use the [inference.net](https://inference.ne
 
 ## Overview
 
-The inference.net Async API allows you to submit inference requests that complete within 24-72 hours (but generally finish much faster, often within a few minutes) at significantly reduced costs. This is ideal for:
+The inference.net Async API allows you to submit inference requests that complete within 24-72 hours (but generally finish much faster, often within a few minutes) at significantly reduced costs. This repository contains two approaches for working with the async API:
 
-- Large-scale content generation
-- Batch document processing
-- Non-urgent data analysis
-- Cost-sensitive workloads
+| Approach | Description | Best For |
+|----------|-------------|----------|
+| [**Single Request**](./async/) | Submit requests individually, poll each separately | Streaming, fine-grained control |
+| [**Group API**](./async-with-group/) | Submit up to 50 requests as a batch | Batch processing, simpler tracking |
+
+## Quick Comparison
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SINGLE REQUEST APPROACH                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Request 1 ──► /v1/async/chat/completions ──► ID-1 ──► Poll /generation/1  │
+│   Request 2 ──► /v1/async/chat/completions ──► ID-2 ──► Poll /generation/2  │
+│   Request 3 ──► /v1/async/chat/completions ──► ID-3 ──► Poll /generation/3  │
+│                                                                             │
+│   • Each request tracked independently                                      │
+│   • Poll each generation ID separately                                      │
+│   • Process results as they complete                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           GROUP API APPROACH                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────┐                                                           │
+│   │ Request 1   │                                                           │
+│   │ Request 2   │──► /v1/async/group/chat/completions ──► Group ID          │
+│   │ Request 3   │                                              │            │
+│   └─────────────┘                                              ▼            │
+│                                            Poll /group/{id}/generations     │
+│                                                              │              │
+│   • Single API call for multiple requests                    ▼              │
+│   • One group ID tracks all requests          ┌─────────────────────────┐   │
+│   • Get all results in one response           │ All results together    │   │
+│                                               └─────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Feature Comparison
+
+| Feature | Single Request | Group API |
+|---------|---------------|-----------|
+| Max requests | Unlimited | 50 per group |
+| Submission | Individual API calls | Single batch call |
+| Tracking | One ID per request | One ID for entire group |
+| Polling | Poll each request | Poll once for all |
+| Results | Process as completed | Get all at once |
+| Complexity | More code, more control | Simpler, less flexible |
+
+## When to Use Each Approach
+
+### Use Single Request (`async/`) when:
+
+- Requests arrive over time (streaming/real-time)
+- You need different retry logic per request
+- You want to process results immediately as each completes
+- You're integrating with existing per-request workflows
+- You need more than 50 requests
+
+### Use Group API (`async-with-group/`) when:
+
+- You have a batch of related requests ready to submit
+- You want simpler code with less polling logic
+- You're processing up to 50 requests together
+- You want to track completion of an entire batch
+- You plan to use webhook notifications (coming soon)
 
 ## Prerequisites
 
@@ -35,141 +99,44 @@ brew install uv
 export INFERENCE_API_KEY=your-api-key-here
 ```
 
-2. Run the polling example:
+2. Run either example:
 
 ```bash
-uv run async_polling_example.py
+# Single request approach
+uv run async/async_polling_example.py
+
+# Group API approach
+uv run async-with-group/async_polling_example.py
 ```
 
-## Configuration
-
-Edit the configuration section at the top of `async_polling_example.py`:
-
-```python
-NUM_REQUESTS = 10           # Number of requests to submit (max 50)
-MODEL_ID = "your-model-id"  # Model to use for inference
-POLL_INTERVAL_SECONDS = 2   # Seconds between polling attempts
-MAX_POLL_ATTEMPTS = 120     # Maximum polling attempts
-```
-
-## Examples
-
-### Polling Example (`async_polling_example.py`)
-
-Demonstrates submitting a group of inference requests, polling for results, and displaying a comprehensive summary.
-
-**Features:**
-- Configurable number of requests (up to 50)
-- Progress bar during polling
-- Request-response correlation via custom IDs
-- Comprehensive summary with success rates, performance metrics, and token usage
-
-**Sample Output:**
+## Project Structure
 
 ```
-================================================================================
- INFERENCE.NET ASYNC GROUP API - POLLING EXAMPLE
-================================================================================
-
-  Configuration:
-    • Requests to submit: 10
-    • Model: inference-net/load-test
-    • Poll interval: 2s
-
-  Submitting 10 Requests
-  --------------------------
-
-    req-001: What is the capital of France?
-    req-002: What is 2 + 2?
-    req-003: Name one planet in our solar system.
-    req-004: What color is the sky on a clear day?
-    req-005: How many legs does a spider have?
-    ... and 5 more
-
-  Submitting to Group API...
-  ✓ Group created: 6Z6oLaIo0PFleu2Wc1LIg
-  ✓ Group size: 10
-
-  Polling for Results
-  -----------------------
-
-  [  1] |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░| 0/10 (0%) (⏳ 0 running, 5 queued)
-  [  2] |████████████████████████░░░░░░| 8/10 (80%) (⏳ 2 running, 0 queued)
-  [  3] |██████████████████████████████| 10/10 (100%)
-
-================================================================================
- GROUP GENERATION SUMMARY
-================================================================================
-
-  Success Rate
-  ----------------
-  ✓ |████████████████████████████████████████| 100.0%
-
-      Successful:    10
-      Failed:         0
-      Total:         10
-
-  Performance Metrics
-  -----------------------
-      Total wall-clock time:      12.75s
-      Avg generation time:       2803.1ms
-      Min generation time:        955.0ms
-      Max generation time:       4556.0ms
-      Throughput:                  0.78 req/s
-
-  Token Usage
-  ---------------
-      Prompt tokens:            186
-      Completion tokens:      1,000
-      Total tokens:           1,186
-      Avg completion/req:     100.0
-
-  Request-Response Correlation
-  --------------------------------
-
-  ID         Status     Question                       Response
-  ---------- ---------- ------------------------------ -------------------------
-  req-001    ✓ Success  What is the capital of Fr...   The capital of France...
-  req-002    ✓ Success  What is 2 + 2?                 2 + 2 equals 4.
-  req-003    ✓ Success  Name one planet in our so...   Mars is a planet in...
-  ...
-
-================================================================================
- Generation complete!
-================================================================================
+python-async-samples/
+├── README.md                          # This file
+├── async/                             # Single request approach
+│   ├── README.md                      # Detailed documentation
+│   └── async_polling_example.py       # Example script
+└── async-with-group/                  # Group API approach
+    ├── README.md                      # Detailed documentation
+    └── async_polling_example.py       # Example script
 ```
 
-## How Request-Response Correlation Works
+## API Endpoints Reference
 
-Each request includes a `metadata.custom_id` field that persists through the async processing pipeline:
-
-```python
-{
-    "model": "your-model",
-    "messages": [...],
-    "metadata": {"custom_id": "req-001"}  # Your tracking ID
-}
-```
-
-When retrieving results, the custom_id is available in the response, allowing you to match responses back to your original requests:
-
-```python
-# In the generation response:
-generation["request"]["metadata"]["custom_id"]  # "req-001"
-```
-
-## API Endpoints Used
+### Single Request API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/v1/async/group/chat/completions` | POST | Submit a group of chat completion requests |
-| `/v1/async/group/{groupId}/generations` | GET | Retrieve results for a group |
+| `/v1/async/chat/completions` | POST | Submit a single async request |
+| `/v1/generation/{id}` | GET | Get result for a generation |
 
-## Group API Limits
+### Group API
 
-- Maximum 50 requests per group
-- Completion time: 24-72 hours
-- Groups expire after 72 hours if not completed
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/async/group/chat/completions` | POST | Submit a group of requests |
+| `/v1/async/group/{groupId}/generations` | GET | Get all results for a group |
 
 ## Documentation
 
